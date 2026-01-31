@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- Apple Mobile Web App Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Ski Bear">
+    
+    <title>Ski Bear Pro - PS2 Edition</title>
+    <style>
+        :root {
+            --ps2-blue: #003399;
+            --ps2-gold: #ffcc00;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #a0b0d0;
+            font-family: 'Courier New', Courier, monospace;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #ui {
+            position: absolute;
+            top: env(safe-area-inset-top, 20px);
+            left: 20px;
+            color: #fff;
+            text-shadow: 2px 2px #000;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .score-label { font-size: 12px; opacity: 0.8; letter-spacing: 2px; }
+        #score { font-size: 32px; font-weight: bold; }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 20, 0.7);
+            color: white;
+            z-index: 20;
+            text-align: center;
+            backdrop-filter: blur(4px);
+        }
+
+        h1 {
+            font-size: 42px;
+            margin: 0;
+            color: var(--ps2-gold);
+            text-shadow: 3px 3px #cc0000;
+            letter-spacing: 4px;
+            transform: skew(-10deg);
+        }
+
+        #crash-msg {
+            color: #ff4444;
+            font-size: 24px;
+            margin-bottom: 20px;
+            display: none;
+            font-weight: bold;
+        }
+
+        .btn {
+            margin-top: 20px;
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #fff;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            text-transform: uppercase;
+            box-shadow: 4px 4px 0px #333;
+            border-radius: 2px;
+        }
+
+        .btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px #333;
+        }
+
+        #roar-text {
+            position: absolute;
+            bottom: 30%;
+            left: 50%;
+            transform: translateX(-50%) rotate(-10deg);
+            font-size: 80px;
+            font-weight: 900;
+            color: var(--ps2-gold);
+            text-shadow: 5px 5px #cc0000;
+            display: none;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        #scanlines {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 3px;
+            pointer-events: none;
+            z-index: 100;
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div class="score-label">DISTANCE</div>
+        <div id="score">0m</div>
+    </div>
+
+    <div id="roar-text">ROAR!</div>
+
+    <div id="overlay">
+        <h1 id="title">SKI BEAR PRO</h1>
+        <div id="crash-msg">WASTED</div>
+        <p id="instruction" style="margin-top:10px; opacity:0.8;">DRAG TO STEER • JUMP TO ROAR</p>
+        <button id="startBtn" class="btn">START RUN</button>
+    </div>
+
+    <div id="scanlines"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game Settings
+        const WORLD_SPEED = 0.65;
+        const GRAVITY = 0.009;
+        const JUMP_FORCE = 0.4;
+        const TREE_SPAWN_RATE = 0.09;
+        const RAMP_SPAWN_RATE = 0.015;
+        const FOG_COLOR = 0xb0c4de;
+
+        let scene, camera, renderer, skier, scarf, snow;
+        let trees = [];
+        let ramps = [];
+        let gameState = 'START'; 
+        let score = 0;
+        let skierX = 0;
+        let skierY = 0;
+        let skierVelocityY = 0;
+        let isJumping = false;
+        let targetX = 0;
+        let audioCtx = null;
+
+        const scoreEl = document.getElementById('score');
+        const overlay = document.getElementById('overlay');
+        const startBtn = document.getElementById('startBtn');
+        const crashMsg = document.getElementById('crash-msg');
+        const roarText = document.getElementById('roar-text');
+
+        window.onload = init;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(FOG_COLOR);
+            scene.fog = new THREE.Fog(FOG_COLOR, 25, 85);
+
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 8, 16);
+            camera.lookAt(0, 2, -5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const dl = new THREE.DirectionalLight(0xffffff, 1.0);
+            dl.position.set(10, 20, 10);
+            scene.add(dl);
+
+            const snowGeo = new THREE.PlaneGeometry(200, 200);
+            const snowMat = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true });
+            snow = new THREE.Mesh(snowGeo, snowMat);
+            snow.rotation.x = -Math.PI / 2;
+            scene.add(snow);
+
+            createHighDetailBear();
+
+            // Mobile & Desktop Controls
+            const handleMove = (e) => {
+                if (gameState !== 'PLAYING') return;
+                const x = e.touches ? e.touches[0].clientX : e.clientX;
+                targetX = ((x / window.innerWidth) - 0.5) * 24;
+                if(e.touches) e.preventDefault();
+            };
+
+            window.addEventListener('mousemove', handleMove);
+            window.addEventListener('touchmove', handleMove, { passive: false });
+            startBtn.addEventListener('click', startGame);
+            window.addEventListener('resize', onWindowResize);
+
+            animate();
+        }
+
+        function playRoarSound() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const dur = 0.7;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + dur);
+
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(800, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + dur);
+
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + dur);
+
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+
+            roarText.style.display = 'block';
+            setTimeout(() => roarText.style.display = 'none', 600);
+        }
+
+        function createHighDetailBear() {
+            skier = new THREE.Group();
+            
+            const brown = new THREE.MeshPhongMaterial({ color: 0x5D4037 });
+            const light = new THREE.MeshPhongMaterial({ color: 0x8D6E63 });
+            const red = new THREE.MeshPhongMaterial({ color: 0xcc0000 });
+            const dark = new THREE.MeshPhongMaterial({ color: 0x222222 });
+
+            // Body
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.8, 1.3), brown);
+            body.position.y = 1.1;
+            skier.add(body);
+
+            // Belly
+            const belly = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.2), light);
+            belly.position.set(0, 1.0, 0.6);
+            skier.add(belly);
+
+            // Head
+            const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), brown);
+            head.position.set(0, 2.5, 0.2);
+            skier.add(head);
+
+            // Ears
+            const earL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.2), brown);
+            earL.position.set(-0.5, 3.1, 0.2);
+            const earR = earL.clone();
+            earR.position.x = 0.5;
+            skier.add(earL, earR);
+
+            // Snout
+            const snout = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.4), light);
+            snout.position.set(0, 2.3, 0.8);
+            skier.add(snout);
+
+            const nose = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.1), dark);
+            nose.position.set(0, 2.4, 1.0);
+            skier.add(nose);
+
+            // Scarf
+            const scarfKnot = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.3, 1.4), red);
+            scarfKnot.position.y = 1.9;
+            skier.add(scarfKnot);
+
+            scarf = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 1.5), red);
+            scarf.position.set(0.6, 1.9, -0.6);
+            skier.add(scarf);
+
+            // Arms
+            const armL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), brown);
+            armL.position.set(-1.0, 1.4, 0.3);
+            armL.rotation.z = 0.4;
+            const armR = armL.clone();
+            armR.position.x = 1.0;
+            armR.rotation.z = -0.4;
+            skier.add(armL, armR);
+
+            // Skis
+            const skiL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 3.5), dark);
+            skiL.position.set(-0.6, 0.1, 0.5);
+            const skiR = skiL.clone();
+            skiR.position.x = 0.6;
+            skier.add(skiL, skiR);
+
+            scene.add(skier);
+        }
+
+        function startGame() {
+            gameState = 'PLAYING';
+            overlay.style.display = 'none';
+            score = 0; skierX = 0; skierY = 0; skierVelocityY = 0; isJumping = false;
+            trees.forEach(t => scene.remove(t));
+            ramps.forEach(r => scene.remove(r));
+            trees = []; ramps = [];
+        }
+
+        function createTree() {
+            const t = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.6, 2, 0.6), new THREE.MeshPhongMaterial({color: 0x3E2723}));
+            trunk.position.y = 1;
+            const leaves = new THREE.Mesh(new THREE.ConeGeometry(2.5, 6, 6), new THREE.MeshPhongMaterial({color: 0x1B5E20, flatShading: true}));
+            leaves.position.y = 4;
+            t.add(trunk, leaves);
+            t.position.set((Math.random() - 0.5) * 60, 0, -100);
+            scene.add(t);
+            trees.push(t);
+        }
+
+        function createRamp() {
+            const r = new THREE.Mesh(new THREE.BoxGeometry(8, 2.5, 6), new THREE.MeshPhongMaterial({color: 0xeeeeee, flatShading: true}));
+            const pos = r.geometry.attributes.position;
+            for(let i=0; i<pos.count; i++) {
+                if(pos.getZ(i) > 0) pos.setY(i, pos.getY(i) - 2.5);
+            }
+            pos.needsUpdate = true;
+            r.position.set((Math.random() - 0.5) * 45, 1, -100);
+            scene.add(r);
+            ramps.push(r);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (gameState === 'PLAYING') {
+                score += WORLD_SPEED;
+                scoreEl.innerText = Math.floor(score) + "m";
+
+                skierX += (targetX - skierX) * 0.1;
+                skier.position.x = skierX;
+                skier.rotation.z = (skierX - targetX) * 0.05;
+
+                if (isJumping) {
+                    skierVelocityY -= GRAVITY;
+                    skierY += skierVelocityY;
+                    scarf.rotation.x = Math.sin(Date.now() * 0.01) * 1.5;
+                    if (skierY <= 0) { skierY = 0; isJumping = false; }
+                } else {
+                    scarf.rotation.x = Math.sin(Date.now() * 0.01) * 0.3;
+                }
+                skier.position.y = skierY;
+
+                if (Math.random() < TREE_SPAWN_RATE) createTree();
+                if (Math.random() < RAMP_SPAWN_RATE) createRamp();
+
+                trees.forEach((t, i) => {
+                    t.position.z += WORLD_SPEED;
+                    if (Math.abs(t.position.x - skier.position.x) < 2.5 && Math.abs(t.position.z) < 1.5 && skierY < 2.5) {
+                        gameState = 'GAMEOVER';
+                        overlay.style.display = 'flex';
+                        crashMsg.style.display = 'block';
+                    }
+                    if (t.position.z > 20) { scene.remove(t); trees.splice(i, 1); }
+                });
+
+                ramps.forEach((r, i) => {
+                    r.position.z += WORLD_SPEED;
+                    if (Math.abs(r.position.x - skier.position.x) < 4 && Math.abs(r.position.z) < 2 && !isJumping) {
+                        isJumping = true; skierVelocityY = JUMP_FORCE; playRoarSound();
+                    }
+                    if (r.position.z > 20) { scene.remove(r); ramps.splice(i, 1); }
+                });
+
+                snow.position.z += WORLD_SPEED;
+                if (snow.position.z > 50) snow.position.z = 0;
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
