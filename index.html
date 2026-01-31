@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Ski Bear">
     
-    <title>Ski Bear Pro - Gaylor edition Edition</title>
+    <title>Ski Bear Pro - PS2 Edition</title>
     <style>
         :root {
             --ps2-blue: #003399;
@@ -50,11 +50,13 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            background: rgba(0, 0, 20, 0.7);
+            background: rgba(0, 0, 20, 0.85);
             color: white;
             z-index: 20;
             text-align: center;
             backdrop-filter: blur(4px);
+            padding: 20px;
+            box-sizing: border-box;
         }
 
         h1 {
@@ -69,13 +71,39 @@
         #crash-msg {
             color: #ff4444;
             font-size: 24px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             display: none;
             font-weight: bold;
         }
 
+        .leaderboard {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid var(--ps2-gold);
+            padding: 15px;
+            margin: 15px 0;
+            width: 80%;
+            max-width: 300px;
+            font-size: 14px;
+            text-align: left;
+        }
+
+        .leaderboard h2 { font-size: 16px; margin: 0 0 10px 0; color: var(--ps2-gold); border-bottom: 1px solid var(--ps2-gold); }
+        .lb-entry { display: flex; justify-content: space-between; margin-bottom: 4px; }
+
+        input#username {
+            padding: 10px;
+            font-family: inherit;
+            font-size: 18px;
+            width: 200px;
+            margin-bottom: 10px;
+            border: 2px solid var(--ps2-gold);
+            background: #000;
+            color: #fff;
+            outline: none;
+        }
+
         .btn {
-            margin-top: 20px;
+            margin-top: 10px;
             padding: 15px 40px;
             font-size: 20px;
             background: #fff;
@@ -129,20 +157,107 @@
     <div id="roar-text">ROAR!</div>
 
     <div id="overlay">
-        <h1 id="title">SKI BEAR PRO 2!</h1>
+        <h1 id="title">SKI BEAR PRO</h1>
         <div id="crash-msg">WASTED</div>
-        <p id="instruction" style="margin-top:10px; opacity:0.8;">DRAG TO STEER • JUMP TO ROAR</p>
+        
+        <div id="user-setup" style="display: none; flex-direction: column; align-items: center;">
+            <p style="margin-bottom: 10px;">ENTER USERNAME FOR LEADERBOARD</p>
+            <input type="text" id="username" placeholder="NAME..." maxlength="10">
+        </div>
+
+        <div class="leaderboard" id="leaderboard">
+            <h2>TOP BEARS</h2>
+            <div id="lb-content">LOADING...</div>
+        </div>
+
         <button id="startBtn" class="btn">START RUN</button>
     </div>
 
     <div id="scanlines"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>
-        // Game Settings
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
+
+        // Firebase Setup
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ski-bear-pro';
+
+        let user = null;
+        let username = localStorage.getItem('ski_bear_user') || "";
+        let personalBest = 0;
+
+        // Auth Logic
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        onAuthStateChanged(auth, async (u) => {
+            user = u;
+            if (user) {
+                if (!username) {
+                    document.getElementById('user-setup').style.display = 'flex';
+                }
+                loadLeaderboard();
+            }
+        });
+
+        initAuth();
+
+        // High Score Saving
+        async function saveScore(finalScore) {
+            if (!user || !username) return;
+            
+            // Public path for leaderboard
+            const publicRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', user.uid);
+            const snap = await getDoc(publicRef);
+            
+            if (!snap.exists() || finalScore > snap.data().score) {
+                await setDoc(publicRef, {
+                    name: username,
+                    score: finalScore,
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        // Leaderboard Display
+        function loadLeaderboard() {
+            const lbRef = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+            onSnapshot(lbRef, (snapshot) => {
+                const data = [];
+                snapshot.forEach(doc => data.push(doc.data()));
+                
+                // Sort in memory (Rule 2: No complex queries)
+                data.sort((a, b) => b.score - a.score);
+                
+                const html = data.slice(0, 5).map((entry, i) => `
+                    <div class="lb-entry">
+                        <span>#${i+1} ${entry.name}</span>
+                        <span>${Math.floor(entry.score)}m</span>
+                    </div>
+                `).join('');
+                document.getElementById('lb-content').innerHTML = html || "NO SCORES YET";
+            }, (err) => {
+                console.error(err);
+                document.getElementById('lb-content').innerHTML = "ERROR LOADING";
+            });
+        }
+
+        // Game Logic (Integrated with Three.js)
         const WORLD_SPEED = 0.65;
         const GRAVITY = 0.009;
-        const JUMP_FORCE = 0.4;
+        const JUMP_FORCE = 0.55;
         const TREE_SPAWN_RATE = 0.09;
         const RAMP_SPAWN_RATE = 0.015;
         const FOG_COLOR = 0xb0c4de;
@@ -151,7 +266,7 @@
         let trees = [];
         let ramps = [];
         let gameState = 'START'; 
-        let score = 0;
+        let currentScore = 0;
         let skierX = 0;
         let skierY = 0;
         let skierVelocityY = 0;
@@ -164,8 +279,6 @@
         const startBtn = document.getElementById('startBtn');
         const crashMsg = document.getElementById('crash-msg');
         const roarText = document.getElementById('roar-text');
-
-        window.onload = init;
 
         function init() {
             scene = new THREE.Scene();
@@ -194,7 +307,6 @@
 
             createHighDetailBear();
 
-            // Mobile & Desktop Controls
             const handleMove = (e) => {
                 if (gameState !== 'PLAYING') return;
                 const x = e.touches ? e.touches[0].clientX : e.clientX;
@@ -204,114 +316,84 @@
 
             window.addEventListener('mousemove', handleMove);
             window.addEventListener('touchmove', handleMove, { passive: false });
-            startBtn.addEventListener('click', startGame);
+            startBtn.addEventListener('click', onStartClick);
             window.addEventListener('resize', onWindowResize);
 
             animate();
         }
 
+        function onStartClick() {
+            if (!username) {
+                const input = document.getElementById('username').value;
+                if (!input) return;
+                username = input;
+                localStorage.setItem('ski_bear_user', username);
+                document.getElementById('user-setup').style.display = 'none';
+            }
+            startGame();
+        }
+
         function playRoarSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
-
             const dur = 0.7;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             const filter = audioCtx.createBiquadFilter();
-
             osc.type = 'sawtooth';
             osc.frequency.setValueAtTime(100, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + dur);
-
             filter.type = 'lowpass';
             filter.frequency.setValueAtTime(800, audioCtx.currentTime);
             filter.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + dur);
-
             gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
             gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + dur);
-
             osc.connect(filter);
             filter.connect(gain);
             gain.connect(audioCtx.destination);
-
             osc.start();
             osc.stop(audioCtx.currentTime + dur);
-
             roarText.style.display = 'block';
             setTimeout(() => roarText.style.display = 'none', 600);
         }
 
         function createHighDetailBear() {
             skier = new THREE.Group();
-            
             const brown = new THREE.MeshPhongMaterial({ color: 0x5D4037 });
             const light = new THREE.MeshPhongMaterial({ color: 0x8D6E63 });
             const red = new THREE.MeshPhongMaterial({ color: 0xcc0000 });
             const dark = new THREE.MeshPhongMaterial({ color: 0x222222 });
 
-            // Body
             const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.8, 1.3), brown);
-            body.position.y = 1.1;
-            skier.add(body);
-
-            // Belly
+            body.position.y = 1.1; skier.add(body);
             const belly = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.2), light);
-            belly.position.set(0, 1.0, 0.6);
-            skier.add(belly);
-
-            // Head
+            belly.position.set(0, 1.0, 0.6); skier.add(belly);
             const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), brown);
-            head.position.set(0, 2.5, 0.2);
-            skier.add(head);
-
-            // Ears
+            head.position.set(0, 2.5, 0.2); skier.add(head);
             const earL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.2), brown);
             earL.position.set(-0.5, 3.1, 0.2);
-            const earR = earL.clone();
-            earR.position.x = 0.5;
-            skier.add(earL, earR);
-
-            // Snout
+            const earR = earL.clone(); earR.position.x = 0.5; skier.add(earL, earR);
             const snout = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.4), light);
-            snout.position.set(0, 2.3, 0.8);
-            skier.add(snout);
-
+            snout.position.set(0, 2.3, 0.8); skier.add(snout);
             const nose = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.1), dark);
-            nose.position.set(0, 2.4, 1.0);
-            skier.add(nose);
-
-            // Scarf
+            nose.position.set(0, 2.4, 1.0); skier.add(nose);
             const scarfKnot = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.3, 1.4), red);
-            scarfKnot.position.y = 1.9;
-            skier.add(scarfKnot);
-
+            scarfKnot.position.y = 1.9; skier.add(scarfKnot);
             scarf = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 1.5), red);
-            scarf.position.set(0.6, 1.9, -0.6);
-            skier.add(scarf);
-
-            // Arms
+            scarf.position.set(0.6, 1.9, -0.6); skier.add(scarf);
             const armL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), brown);
-            armL.position.set(-1.0, 1.4, 0.3);
-            armL.rotation.z = 0.4;
-            const armR = armL.clone();
-            armR.position.x = 1.0;
-            armR.rotation.z = -0.4;
-            skier.add(armL, armR);
-
-            // Skis
+            armL.position.set(-1.0, 1.4, 0.3); armL.rotation.z = 0.4;
+            const armR = armL.clone(); armR.position.x = 1.0; armR.rotation.z = -0.4; skier.add(armL, armR);
             const skiL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 3.5), dark);
             skiL.position.set(-0.6, 0.1, 0.5);
-            const skiR = skiL.clone();
-            skiR.position.x = 0.6;
-            skier.add(skiL, skiR);
-
+            const skiR = skiL.clone(); skiR.position.x = 0.6; skier.add(skiL, skiR);
             scene.add(skier);
         }
 
         function startGame() {
             gameState = 'PLAYING';
             overlay.style.display = 'none';
-            score = 0; skierX = 0; skierY = 0; skierVelocityY = 0; isJumping = false;
+            currentScore = 0; skierX = 0; skierY = 0; skierVelocityY = 0; isJumping = false;
             trees.forEach(t => scene.remove(t));
             ramps.forEach(r => scene.remove(r));
             trees = []; ramps = [];
@@ -325,8 +407,7 @@
             leaves.position.y = 4;
             t.add(trunk, leaves);
             t.position.set((Math.random() - 0.5) * 60, 0, -100);
-            scene.add(t);
-            trees.push(t);
+            scene.add(t); trees.push(t);
         }
 
         function createRamp() {
@@ -336,9 +417,11 @@
                 if(pos.getZ(i) > 0) pos.setY(i, pos.getY(i) - 2.5);
             }
             pos.needsUpdate = true;
+            const edges = new THREE.EdgesGeometry(r.geometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xff0000 }));
+            r.add(line);
             r.position.set((Math.random() - 0.5) * 45, 1, -100);
-            scene.add(r);
-            ramps.push(r);
+            scene.add(r); ramps.push(r);
         }
 
         function onWindowResize() {
@@ -350,8 +433,8 @@
         function animate() {
             requestAnimationFrame(animate);
             if (gameState === 'PLAYING') {
-                score += WORLD_SPEED;
-                scoreEl.innerText = Math.floor(score) + "m";
+                currentScore += WORLD_SPEED;
+                scoreEl.innerText = Math.floor(currentScore) + "m";
 
                 skierX += (targetX - skierX) * 0.1;
                 skier.position.x = skierX;
@@ -360,8 +443,9 @@
                 if (isJumping) {
                     skierVelocityY -= GRAVITY;
                     skierY += skierVelocityY;
+                    skier.rotation.y += 0.25;
                     scarf.rotation.x = Math.sin(Date.now() * 0.01) * 1.5;
-                    if (skierY <= 0) { skierY = 0; isJumping = false; }
+                    if (skierY <= 0) { skierY = 0; isJumping = false; skier.rotation.y = 0; }
                 } else {
                     scarf.rotation.x = Math.sin(Date.now() * 0.01) * 0.3;
                 }
@@ -376,6 +460,7 @@
                         gameState = 'GAMEOVER';
                         overlay.style.display = 'flex';
                         crashMsg.style.display = 'block';
+                        saveScore(currentScore);
                     }
                     if (t.position.z > 20) { scene.remove(t); trees.splice(i, 1); }
                 });
@@ -393,6 +478,8 @@
             }
             renderer.render(scene, camera);
         }
+
+        init();
     </script>
 </body>
 </html>
