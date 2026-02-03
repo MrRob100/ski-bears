@@ -76,32 +76,6 @@
             font-weight: bold;
         }
 
-        .leaderboard {
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid var(--ps2-gold);
-            padding: 15px;
-            margin: 15px 0;
-            width: 80%;
-            max-width: 300px;
-            font-size: 14px;
-            text-align: left;
-        }
-
-        .leaderboard h2 { font-size: 16px; margin: 0 0 10px 0; color: var(--ps2-gold); border-bottom: 1px solid var(--ps2-gold); }
-        .lb-entry { display: flex; justify-content: space-between; margin-bottom: 4px; }
-
-        input#username {
-            padding: 10px;
-            font-family: inherit;
-            font-size: 18px;
-            width: 200px;
-            margin-bottom: 10px;
-            border: 2px solid var(--ps2-gold);
-            background: #000;
-            color: #fff;
-            outline: none;
-        }
-
         .btn {
             margin-top: 10px;
             padding: 15px 40px;
@@ -145,6 +119,74 @@
             z-index: 100;
             opacity: 0.4;
         }
+
+        #final-score {
+            font-size: 20px;
+            color: var(--ps2-gold);
+            margin: 10px 0;
+            display: none;
+            letter-spacing: 2px;
+        }
+
+        #save-section {
+            display: none;
+            margin: 10px 0;
+            text-align: center;
+        }
+
+        #save-form {
+            display: none;
+            margin-top: 10px;
+        }
+
+        #username {
+            padding: 10px 15px;
+            font-size: 18px;
+            font-family: inherit;
+            text-transform: uppercase;
+            border: none;
+            box-shadow: 4px 4px 0px #333;
+            border-radius: 2px;
+            width: 140px;
+            text-align: center;
+        }
+
+        #save-confirm {
+            color: var(--ps2-gold);
+            font-size: 16px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .leaderboard {
+            margin-top: 15px;
+            width: 280px;
+        }
+
+        .leaderboard h2 {
+            font-size: 18px;
+            color: var(--ps2-gold);
+            margin: 0 0 8px 0;
+            letter-spacing: 3px;
+        }
+
+        .lb-entry {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            font-size: 14px;
+            color: #ccc;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .lb-entry:first-child {
+            color: var(--ps2-gold);
+        }
+
+        #lb-content {
+            font-size: 14px;
+            color: #888;
+        }
     </style>
 </head>
 <body>
@@ -159,99 +201,77 @@
     <div id="overlay">
         <h1 id="title">SKI BEAR PRO</h1>
         <div id="crash-msg">WASTED</div>
-        
-        <div id="user-setup" style="display: none; flex-direction: column; align-items: center;">
-            <p style="margin-bottom: 10px;">ENTER USERNAME FOR LEADERBOARD</p>
-            <input type="text" id="username" placeholder="NAME..." maxlength="10">
+        <div id="final-score"></div>
+        <div id="save-section">
+            <button id="saveBtn" class="btn">SAVE SCORE</button>
+            <div id="save-form">
+                <input id="username" maxlength="10" placeholder="NAME...">
+                <button id="submitBtn" class="btn" style="margin-left:5px;">SUBMIT</button>
+            </div>
+            <div id="save-confirm">SCORE SAVED!</div>
         </div>
-
-        <div class="leaderboard" id="leaderboard">
+        <div class="leaderboard">
             <h2>TOP BEARS</h2>
             <div id="lb-content">LOADING...</div>
         </div>
-
         <button id="startBtn" class="btn">START RUN</button>
     </div>
 
     <div id="scanlines"></div>
 
-    <!-- Firebase SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js';
 
-        // Firebase Setup
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ski-bear-pro';
-
-        let user = null;
-        let username = localStorage.getItem('ski_bear_user') || "";
-        let personalBest = 0;
-
-        // Auth Logic
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
+        // ---- Firebase Config ----
+        const firebaseConfig = {
+            apiKey: "AIzaSyB7AbAti42YQIVFvRWde90cZ5ZveSw1d-M",
+            authDomain: "ski-bear.firebaseapp.com",
+            projectId: "ski-bear",
+            storageBucket: "ski-bear.firebasestorage.app",
+            messagingSenderId: "775825286054",
+            appId: "1:775825286054:web:30252b59d43b12c6252567"
         };
 
-        onAuthStateChanged(auth, async (u) => {
-            user = u;
-            if (user) {
-                if (!username) {
-                    document.getElementById('user-setup').style.display = 'flex';
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // ---- Leaderboard Functions ----
+        async function loadLeaderboard() {
+            const lbContent = document.getElementById('lb-content');
+            try {
+                const q = query(collection(db, 'scores'), orderBy('score', 'desc'), limit(5));
+                const snapshot = await getDocs(q);
+                if (snapshot.empty) {
+                    lbContent.textContent = 'NO SCORES YET';
+                    return;
                 }
-                loadLeaderboard();
-            }
-        });
-
-        initAuth();
-
-        // High Score Saving
-        async function saveScore(finalScore) {
-            if (!user || !username) return;
-            
-            // Public path for leaderboard
-            const publicRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', user.uid);
-            const snap = await getDoc(publicRef);
-            
-            if (!snap.exists() || finalScore > snap.data().score) {
-                await setDoc(publicRef, {
-                    name: username,
-                    score: finalScore,
-                    timestamp: Date.now()
+                lbContent.innerHTML = '';
+                snapshot.forEach((doc) => {
+                    const d = doc.data();
+                    const entry = document.createElement('div');
+                    entry.className = 'lb-entry';
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = d.name;
+                    const scoreSpan = document.createElement('span');
+                    scoreSpan.textContent = d.score + 'm';
+                    entry.appendChild(nameSpan);
+                    entry.appendChild(scoreSpan);
+                    lbContent.appendChild(entry);
                 });
+            } catch (e) {
+                lbContent.textContent = 'LEADERBOARD UNAVAILABLE';
             }
         }
 
-        // Leaderboard Display
-        function loadLeaderboard() {
-            const lbRef = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
-            onSnapshot(lbRef, (snapshot) => {
-                const data = [];
-                snapshot.forEach(doc => data.push(doc.data()));
-                
-                // Sort in memory (Rule 2: No complex queries)
-                data.sort((a, b) => b.score - a.score);
-                
-                const html = data.slice(0, 5).map((entry, i) => `
-                    <div class="lb-entry">
-                        <span>#${i+1} ${entry.name}</span>
-                        <span>${Math.floor(entry.score)}m</span>
-                    </div>
-                `).join('');
-                document.getElementById('lb-content').innerHTML = html || "NO SCORES YET";
-            }, (err) => {
-                console.error(err);
-                document.getElementById('lb-content').innerHTML = "ERROR LOADING";
+        async function saveScore(name, score) {
+            await addDoc(collection(db, 'scores'), {
+                name: name,
+                score: score,
+                timestamp: Date.now()
             });
+            await loadLeaderboard();
         }
 
         // Game Logic (Integrated with Three.js)
@@ -279,6 +299,13 @@
         const startBtn = document.getElementById('startBtn');
         const crashMsg = document.getElementById('crash-msg');
         const roarText = document.getElementById('roar-text');
+        const finalScore = document.getElementById('final-score');
+        const saveSection = document.getElementById('save-section');
+        const saveBtn = document.getElementById('saveBtn');
+        const saveForm = document.getElementById('save-form');
+        const usernameInput = document.getElementById('username');
+        const submitBtn = document.getElementById('submitBtn');
+        const saveConfirm = document.getElementById('save-confirm');
 
         function init() {
             scene = new THREE.Scene();
@@ -317,19 +344,31 @@
             window.addEventListener('mousemove', handleMove);
             window.addEventListener('touchmove', handleMove, { passive: false });
             startBtn.addEventListener('click', onStartClick);
+            saveBtn.addEventListener('click', () => {
+                saveBtn.style.display = 'none';
+                saveForm.style.display = 'inline-block';
+                usernameInput.focus();
+            });
+            submitBtn.addEventListener('click', async () => {
+                const name = usernameInput.value.trim().toUpperCase();
+                if (!name) return;
+                submitBtn.disabled = true;
+                submitBtn.textContent = '...';
+                try {
+                    await saveScore(name, Math.floor(currentScore));
+                    saveForm.style.display = 'none';
+                    saveConfirm.style.display = 'block';
+                } catch (e) {
+                    submitBtn.textContent = 'ERROR';
+                }
+            });
             window.addEventListener('resize', onWindowResize);
 
+            loadLeaderboard();
             animate();
         }
 
         function onStartClick() {
-            if (!username) {
-                const input = document.getElementById('username').value;
-                if (!input) return;
-                username = input;
-                localStorage.setItem('ski_bear_user', username);
-                document.getElementById('user-setup').style.display = 'none';
-            }
             startGame();
         }
 
@@ -393,6 +432,16 @@
         function startGame() {
             gameState = 'PLAYING';
             overlay.style.display = 'none';
+            crashMsg.style.display = 'none';
+            finalScore.style.display = 'none';
+            saveSection.style.display = 'none';
+            saveBtn.style.display = '';
+            saveForm.style.display = 'none';
+            saveConfirm.style.display = 'none';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'SUBMIT';
+            usernameInput.value = '';
+            startBtn.textContent = 'START RUN';
             currentScore = 0; skierX = 0; skierY = 0; skierVelocityY = 0; isJumping = false;
             trees.forEach(t => scene.remove(t));
             ramps.forEach(r => scene.remove(r));
@@ -460,7 +509,11 @@
                         gameState = 'GAMEOVER';
                         overlay.style.display = 'flex';
                         crashMsg.style.display = 'block';
-                        saveScore(currentScore);
+                        finalScore.style.display = 'block';
+                        finalScore.textContent = 'YOU TRAVELLED ' + Math.floor(currentScore) + 'm';
+                        saveSection.style.display = 'block';
+                        startBtn.textContent = 'PLAY AGAIN';
+                        loadLeaderboard();
                     }
                     if (t.position.z > 20) { scene.remove(t); trees.splice(i, 1); }
                 });
